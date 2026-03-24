@@ -1,71 +1,138 @@
-import express from 'express'
-import cors from 'cors'
-import dotenv from 'dotenv'
-import authRoutes from '../src/routes/auth.routes.js'
-import session from 'express-session'
-import { isAuthenticated, isSupervisor } from "../src/middlewares/auth.js"
+//src/server.js
+import express from "express";
+import http from "http";
+import cors from "cors";
+import dotenv from "dotenv";
+import session from "express-session";
+import crypto from "crypto"
+import productosRoutes from "./routes/productos.js"
+import { obtenerProductos } from "./services/stock.service.js"
+import authRoutes from "./routes/auth.routes.js"
+import { Server } from "socket.io";
 
-// # Cargamos variables de entorno desde .env
-dotenv.config()
+dotenv.config();
 
-// # Middleware para parsear JSON en requests
-const app = express()
+const app = express();
+const server = http.createServer(app);
 
-// # Esto permite que Express entienda body en formato JSON sin necesidad de usar body-parser
-app.use(express.json())
+// =======================
+// MIDDLEWARES
+// =======================
+app.use(express.json());
 
+app.use("/api/auth", authRoutes)
 
+const allowedOrigin =
+    process.env.NODE_ENV === "production"
+        ? process.env.FRONTEND_PROD
+        : process.env.FRONTEND_DEV;
 
-// # Elegimos la URL del frontend según entorno
-const allowedOrigin = process.env.NODE_ENV === 'production'
-    ? process.env.FRONTEND_PROD
-    : process.env.FRONTEND_DEV
+app.use(
+    cors({
+        origin: allowedOrigin,
+        credentials: true,
+    })
+);
 
-// # Middleware para permitir CORS (comunicación entre frontend y backend)
-app.use(cors({
-    origin: allowedOrigin,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // 🔑 aseguramos métodos permitidos
-    allowedHeaders: ['Content-Type', 'Authorization']  // 🔑 headers permitidos
-}))
+app.use(
+    session({
+        secret: process.env.SESSION_SECRET || "dev-secret",
+        resave: false,
+        saveUninitialized: false,
+    })
+);
 
-// # Configuración de sesiones
-// * Esto crea un objeto req.session que podemos usar en cualquier ruta
-app.use(session({
-    secret: process.env.SESSION_SECRET || 'dev-secret', // clave secreta
-    resave: false,       // # No guardar sesión si no hubo cambios
-    saveUninitialized: false, // # No guardar sesión vacía
-    cookie: { secure: process.env.NODE_ENV === 'production' } // # true si usamos https
-}))
+app.use("/api/productos", productosRoutes)
 
-// # Usar rutas de auth
-app.use('/auth', authRoutes)
+// =======================
+// SOCKET.IO (ACÁ SE CREA)
+// =======================
+const io = new Server(server, {
+    cors: {
+        origin: allowedOrigin,
+        credentials: true,
+    },
+});
+// =======================
+// SOCKET EVENTS
+// =======================
+io.on("connection", (socket) => {
+    console.log("🟢 Cliente conectado:", socket.id);
 
-// # Leemos los usuarios del .env USERS=[JSON]
-let users = []
-try {
-    users = JSON.parse(process.env.USERS || "[]")
-} catch (error) {
-    console.error("Error al parsear USERS en .env:", error)
-}
+    // Mandar stock inicial
+    socket.emit("stockActualizado", obtenerProductos())
 
-// # Endpoint GET /users → devuelve todos los usuarios cargados / TEST
-app.get('/users', (req, res) => {
-    res.json(users)
-})
+    socket.on("agregarProducto", (data) => {
+        const {
+            codigo,
+            nombre,
+            proveedor,
+            categoria,
+            precioCosto,
+            fechaVencimiento,
+            cantidad
+        } = data;
 
-// Ruta protegida
-app.get("/protect-route", isAuthenticated, (req, res) => {
-    res.json({ message: "Bienvenido la ruta para usuarios logueados", user: req.session.user })
-})
+        if (!codigo || !nombre || !precioCosto || cantidad <= 0) return;
 
-// Ruta protegida para admin
-app.get("/admin", isSupervisor, (req, res) => {
-    res.json({ message: "Sección solo para supervisores" })
-})
+        const precioVenta = Math.round(precioCosto * 1.7);
 
-// # Definimos el puerto de la app (por defecto 4000 o el de Render)
-const PORT = process.env.PORT || 4000
+        let producto = productos.find(p => p.codigo === codigo);
 
-// # Iniciamos el servidor en el puerto definido
-app.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`))
+        if (!producto) {
+            producto = {
+                codigo,
+                nombre,
+                proveedor,
+                categoria,
+                precioCosto,
+                precioVenta,
+                lotes: []
+            };
+            productos.push(producto);
+        } else {
+            // si cambia el costo, actualizamos
+            producto.precioCosto = precioCosto;
+            producto.precioVenta = precioVenta;
+        }
+
+        const loteExistente = producto.lotes.find(
+            l => l.fechaVencimiento === fechaVencimiento
+        );
+
+        if (loteExistente) {
+            loteExistente.cantidad += cantidad;
+        } else {
+            producto.lotes.push({
+                fechaVencimiento,
+                cantidad
+            });
+        }
+
+        producto.lotes.sort(
+            (a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento)
+        );
+
+        io.emit("stockActualizado", productos);
+    });
+
+    socket.on("eliminarProducto", (codigo) => {
+        const index = productos.findIndex(p => p.codigo === codigo);
+        if (index !== -1) productos.splice(index, 1);
+
+        io.emit("stockActualizado", productos);
+    });
+
+    socket.on("disconnect", () => {
+        console.log("🔴 Cliente desconectado:", socket.id);
+    });
+});
+
+// =======================
+// LISTEN
+// =======================
+const PORT = process.env.PORT || 4000;
+
+server.listen(PORT, () => {
+    console.log(`🚀 Server escuchando en http://localhost:${PORT}`);
+});
