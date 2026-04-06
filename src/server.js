@@ -17,20 +17,24 @@ const server = http.createServer(app)
 
 app.use(express.json())
 
-const allowedOrigin =
-process.env.NODE_ENV === "production"
-? process.env.FRONTEND_PROD
-: process.env.FRONTEND_DEV
+const allowedOrigin = [
+    process.env.FRONTEND_DEV,
+    process.env.FRONTEND_PROD
+]
+
+app.use(cors({
+    origin: function (origin, callback) {
+        if (!origin || allowedOrigin.includes(origin)) {
+            callback(null, true)
+        } else {
+            callback(new Error("CORS no permitido"))
+        }
+    },
+    credentials: true
+}))
 
 app.use(
-    cors({
-        origin: allowedOrigin,
-                credentials: true
-            })
-        )
-        
-        app.use(
-            session({
+    session({
         secret: process.env.SESSION_SECRET || "dev-secret",
         resave: false,
         saveUninitialized: false
@@ -51,7 +55,7 @@ const io = new Server(server, {
 io.on("connection", async socket => {
     const productos = await obtenerProductos()
     socket.emit("stockActualizado", productos)
-    
+
     socket.on("disconnect", () => { })
 })
 
