@@ -1,138 +1,65 @@
-//src/server.js
-import express from "express";
-import http from "http";
-import cors from "cors";
-import dotenv from "dotenv";
-import session from "express-session";
-import crypto from "crypto"
+//backend-src/server.js
+import { initDB } from "./init-db.js"
+import express from "express"
+import http from "http"
+import cors from "cors"
+import dotenv from "dotenv"
+import session from "express-session"
 import productosRoutes from "./routes/productos.js"
 import { obtenerProductos } from "./services/stock.service.js"
 import authRoutes from "./routes/auth.routes.js"
-import { Server } from "socket.io";
+import { Server } from "socket.io"
 
-dotenv.config();
+dotenv.config()
 
-const app = express();
-const server = http.createServer(app);
+const app = express()
+const server = http.createServer(app)
 
-// =======================
-// MIDDLEWARES
-// =======================
-app.use(express.json());
-
-app.use("/api/auth", authRoutes)
+app.use(express.json())
 
 const allowedOrigin =
-    process.env.NODE_ENV === "production"
-        ? process.env.FRONTEND_PROD
-        : process.env.FRONTEND_DEV;
+process.env.NODE_ENV === "production"
+? process.env.FRONTEND_PROD
+: process.env.FRONTEND_DEV
 
 app.use(
     cors({
         origin: allowedOrigin,
-        credentials: true,
-    })
-);
-
-app.use(
-    session({
+                credentials: true
+            })
+        )
+        
+        app.use(
+            session({
         secret: process.env.SESSION_SECRET || "dev-secret",
         resave: false,
-        saveUninitialized: false,
+        saveUninitialized: false
     })
-);
+)
+console.log("DATABASE_URL:", process.env.DATABASE_URL)
 
+app.use("/api/auth", authRoutes)
 app.use("/api/productos", productosRoutes)
 
-// =======================
-// SOCKET.IO (ACÁ SE CREA)
-// =======================
 const io = new Server(server, {
     cors: {
         origin: allowedOrigin,
-        credentials: true,
-    },
-});
-// =======================
-// SOCKET EVENTS
-// =======================
-io.on("connection", (socket) => {
-    console.log("🟢 Cliente conectado:", socket.id);
+        credentials: true
+    }
+})
 
-    // Mandar stock inicial
-    socket.emit("stockActualizado", obtenerProductos())
+io.on("connection", async socket => {
+    const productos = await obtenerProductos()
+    socket.emit("stockActualizado", productos)
+    
+    socket.on("disconnect", () => { })
+})
 
-    socket.on("agregarProducto", (data) => {
-        const {
-            codigo,
-            nombre,
-            proveedor,
-            categoria,
-            precioCosto,
-            fechaVencimiento,
-            cantidad
-        } = data;
+await initDB()
 
-        if (!codigo || !nombre || !precioCosto || cantidad <= 0) return;
 
-        const precioVenta = Math.round(precioCosto * 1.7);
-
-        let producto = productos.find(p => p.codigo === codigo);
-
-        if (!producto) {
-            producto = {
-                codigo,
-                nombre,
-                proveedor,
-                categoria,
-                precioCosto,
-                precioVenta,
-                lotes: []
-            };
-            productos.push(producto);
-        } else {
-            // si cambia el costo, actualizamos
-            producto.precioCosto = precioCosto;
-            producto.precioVenta = precioVenta;
-        }
-
-        const loteExistente = producto.lotes.find(
-            l => l.fechaVencimiento === fechaVencimiento
-        );
-
-        if (loteExistente) {
-            loteExistente.cantidad += cantidad;
-        } else {
-            producto.lotes.push({
-                fechaVencimiento,
-                cantidad
-            });
-        }
-
-        producto.lotes.sort(
-            (a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento)
-        );
-
-        io.emit("stockActualizado", productos);
-    });
-
-    socket.on("eliminarProducto", (codigo) => {
-        const index = productos.findIndex(p => p.codigo === codigo);
-        if (index !== -1) productos.splice(index, 1);
-
-        io.emit("stockActualizado", productos);
-    });
-
-    socket.on("disconnect", () => {
-        console.log("🔴 Cliente desconectado:", socket.id);
-    });
-});
-
-// =======================
-// LISTEN
-// =======================
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 4000
 
 server.listen(PORT, () => {
-    console.log(`🚀 Server escuchando en http://localhost:${PORT}`);
-});
+    console.log(`🚀 Server escuchando en http://localhost:${PORT}`)
+})

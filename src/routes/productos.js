@@ -1,110 +1,64 @@
+//src/routes/productos.js
 import express from "express"
-import crypto from "crypto"
-
-import { obtenerProductos, guardarProductos } from "../services/stock.service.js"
+import {
+    obtenerProductos,
+    guardarProducto,
+    eliminarProductoDB,
+    eliminarLoteDB,
+    actualizarProductoDB,
+    actualizarLoteDB
+} from "../services/stock.service.js"
 
 const router = express.Router()
 
-// GET
-router.get("/", (req, res) => {
-    const productos = obtenerProductos()
+router.get("/", async (req, res) => {
+    console.log("➡️ GET /productos")
+    const productos = await obtenerProductos()
     res.json(productos)
 })
 
-// POST
-router.post("/", (req, res) => {
-    const productos = obtenerProductos()
+router.post("/", async (req, res) => {
+    console.log("➡️ POST /productos")
 
-    const {
-        nombre,
-        codigo,
-        numeroLote,
-        fechaVencimiento,
-        cantidad,
-        categoria
-    } = req.body
+    await guardarProducto(req.body)
 
-    if (!codigo || !nombre) {
-        return res.status(400).json({ msg: "faltan datos" })
-    }
-
-    let producto = productos.find(p => p.codigo === codigo)
-
-    if (!producto) {
-        producto = {
-            codigo,
-            nombre,
-            categoria,
-            lotes: []
-        }
-        productos.push(producto)
-    }
-
-    const loteExistente = producto.lotes.find(
-        l => l.numero === numeroLote
-    )
-
-    if (loteExistente) {
-        loteExistente.cantidad += cantidad
-    } else {
-        producto.lotes.push({
-            numero: numeroLote,
-            fechaVencimiento,
-            cantidad
-        })
-    }
-
-    guardarProductos(productos)
-
+    const productos = await obtenerProductos()
     res.json(productos)
 })
 
-// DELETE
-router.delete("/:codigo", (req, res) => {
-    const productos = obtenerProductos()
+router.put("/:codigo/lote", async (req, res) => {
+    console.log("➡️ PUT lote:", req.body)
 
-    const nuevos = productos.filter(p => p.codigo !== req.params.codigo)
+    await actualizarLoteDB(req.params.codigo, req.body)
 
-    guardarProductos(nuevos)
-
-    res.json(nuevos)
-})
-
-router.delete("/:codigo/lote/:numero", (req, res) => {
-    const productos = obtenerProductos()
-
-    const producto = productos.find(p => p.codigo === req.params.codigo)
-
-    if (!producto) {
-        return res.status(404).json({ msg: "producto no encontrado" })
-    }
-
-    producto.lotes = producto.lotes.filter(
-        l => l.numero !== req.params.numero
-    )
-
-    guardarProductos(productos)
-
+    const productos = await obtenerProductos()
     res.json(productos)
 })
 
-// PUT
-router.put("/:codigo", (req, res) => {
-    const productos = obtenerProductos()
+router.delete("/:codigo", async (req, res) => {
+    console.log("➡️ DELETE producto:", req.params.codigo)
 
-    const producto = productos.find(p => p.codigo === req.params.codigo)
+    await eliminarProductoDB(req.params.codigo)
 
-    if (!producto) {
-        return res.status(404).json({ msg: "no encontrado" })
-    }
+    const productos = await obtenerProductos()
+    res.json(productos)
+})
 
-    const { nombre, categoria } = req.body
+router.delete("/:codigo/lote/:numero", async (req, res) => {
+    console.log("➡️ DELETE lote:", req.params)
 
-    producto.nombre = nombre ?? producto.nombre
-    producto.categoria = categoria ?? producto.categoria
+    await eliminarLoteDB(req.params.codigo, req.params.numero)
 
-    guardarProductos(productos)
+    const productos = await obtenerProductos()
+    res.json(productos)
+})
 
+router.put("/:codigo", async (req, res) => {
+    console.log("➡️ PUT producto:", req.params.codigo)
+
+    await actualizarProductoDB(req.params.codigo, req.body)
+
+    const productos = await obtenerProductos()
     res.json(productos)
 })
 
